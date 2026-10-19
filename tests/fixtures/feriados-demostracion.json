@@ -1,0 +1,12 @@
+[
+  {"date":"2026-01-01","name":"Año Nuevo","global":true,"types":["Public"]},
+  {"date":"2026-04-02","name":"Jueves Santo","global":true,"types":["Public"]},
+  {"date":"2026-04-03","name":"Viernes Santo","global":true,"types":["Public"]},
+  {"date":"2026-05-01","name":"Día del Trabajador","global":true,"types":["Public"]},
+  {"date":"2026-07-25","name":"Anexión de Nicoya","global":true,"types":["Public"]},
+  {"date":"2026-08-15","name":"Día de la Madre","global":true,"types":["Public"]},
+  {"date":"2026-09-15","name":"Independencia","global":true,"types":["Public"]},
+  {"date":"2026-12-01","name":"Abolición del Ejército","global":true,"types":["Public"]},
+  {"date":"2026-12-25","name":"Navidad","global":true,"types":["Public"]},
+  {"date":"2027-01-01","name":"Año Nuevo","global":true,"types":["Public"]}
+]

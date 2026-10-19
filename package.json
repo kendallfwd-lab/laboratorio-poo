@@ -1,0 +1,25 @@
+{
+  "name": "laboratorio-facturacion-habiles-cr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FacturaHabiles CR: laboratorio POO + n8n, iniciar JSON Server con npm run db y n8n con npm run n8n",
+  "scripts": {
+    "db": "json-server --watch db.json --port 3001 --static public",
+    "web": "json-server --watch db.json --port 3001 --static public",
+    "demo": "node main.js",
+    "demo:online": "node main.js --online",
+    "test": "node --test tests/*.test.js",
+    "workflow:build": "node scripts/generar-workflow.js",
+    "workflow:check": "node scripts/verificar-workflow.js",
+    "preflight": "npm test && npm run workflow:check",
+    "db:reset": "node scripts/restablecer-db.js",
+    "n8n": "npx --yes n8n start",
+    "verificar:conexion": "node scripts/probar-conexiones.js"
+  },
+  "devDependencies": {
+    "json-server": "0.17.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "facturas": [
+    {
+  "id": "F-DEMO-TRUE-01",
+  "cliente": "Demostracion ruta TRUE",
+  "fechaEmision": "2026-10-15",
+  "plazoDiasHabiles": 5,
+  "monto": 150000,
+  "moneda": "CRC",
+  "estado": "pendiente",
+  "fechaVencimiento": null
+},
+    {
+      "id": "F-POSTMAN-001",
+      "cliente": "Cliente desde Postman",
+      "fechaEmision": "2026-10-19",
+      "plazoDiasHabiles": 15,
+      "monto": 125000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-POSTMAN-002",
+      "cliente": "Cliente desde Postman - segunda factura",
+      "fechaEmision": "2026-10-20",
+      "plazoDiasHabiles": 10,
+      "monto": 200000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-001",
+      "cliente": "Servicios del Pacífico",
+      "fechaEmision": "2026-09-01",
+      "plazoDiasHabiles": 15,
+      "monto": 180000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-002",
+      "cliente": "Comercial Nicoya",
+      "fechaEmision": "2026-10-12",
+      "plazoDiasHabiles": 15,
+      "monto": 225000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-003",
+      "cliente": "Hotel Bahía",
+      "fechaEmision": "2026-09-10",
+      "plazoDiasHabiles": 10,
+      "monto": 300000,
+      "moneda": "CRC",
+      "estado": "pagada",
+      "fechaVencimiento": "2026-09-24"
+    },
+    {
+      "id": "F-004",
+      "cliente": "Distribuidora Central",
+      "fechaEmision": "2026-10-15",
+      "plazoDiasHabiles": 5,
+      "monto": 45000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-005",
+      "cliente": "Costa Azul Exportaciones",
+      "fechaEmision": "2026-12-21",
+      "plazoDiasHabiles": 15,
+      "monto": 490000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-006",
+      "cliente": "Caso de error - fecha faltante",
+      "plazoDiasHabiles": 15,
+      "monto": 85000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-007",
+      "cliente": "Farmacia del Puerto",
+      "fechaEmision": "2026-09-18",
+      "plazoDiasHabiles": 8,
+      "monto": 96000,
+      "moneda": "CRC",
+      "estado": "vencida",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-008",
+      "cliente": "Taller El Roble",
+      "fechaEmision": "2026-10-03",
+      "plazoDiasHabiles": 5,
+      "monto": 120000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-009",
+      "cliente": "Cliente sin facturar - anulada",
+      "fechaEmision": "2026-09-01",
+      "plazoDiasHabiles": 20,
+      "monto": 71000,
+      "moneda": "CRC",
+      "estado": "anulada",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "f-15",
+      "cliente": "kendall",
+      "fechaEmision": "2000-12-12",
+      "plazoDiasHabiles": 15,
+      "monto": 150000,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "f-80",
+      "cliente": "jared",
+      "fechaEmision": "2027-12-09",
+      "plazoDiasHabiles": 1,
+      "monto": 1999,
+      "moneda": "CRC",
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "fechaEmision": "2026-10-15",
+      "id": "F-DEMO-TRUE-01",
+      "moneda": "CRC",
+      "fechaVencimiento": null,
+      "cliente": "Demostracion ruta TRUE",
+      "plazoDiasHabiles": 5,
+      "monto": 150000,
+      "estado": "pendiente"
+    }
+  ],
+  "historial": []
+}

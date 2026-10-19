@@ -1,0 +1,482 @@
+{
+  "name": "FacturaHabiles CR | POO + JSON Server + Nager.Date",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "5511a41f-0000-4000-8000-000000000001",
+      "name": "Ejecutar ahora",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "61fe361b-0000-4000-8000-000000000001",
+      "name": "Cada dia a las 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        200,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "facturas-procesar",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "c18c96a6-0000-4000-8000-000000000001",
+      "name": "Webhook Postman",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        620
+      ],
+      "webhookId": "6c174f25-3db8-4ac8-b1fd-89d9d7ee2718"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:3001/facturas",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "2814e16e-0000-4000-8000-000000000001",
+      "name": "GET Facturas - JSON Server",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        340
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:3001/historial",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "724acc13-0000-4000-8000-000000000001",
+      "name": "GET Historial - JSON Server",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        340
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// AUTO-GENERADO desde src/negocio.js (SHA256: ec17fa5ef51fed8b9ccfd7f55a0ff23e9b1792f246baba2bb9a2fd13122ef188).\n// Modifica src/negocio.js y ejecuta npm run workflow:build.\nconst DIA_MS = 24 * 60 * 60 * 1000;\n\nfunction fechaISO(valor) {\n  if (typeof valor !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(valor)) {\n    throw new Error('FECHA_INVALIDA: se requiere AAAA-MM-DD');\n  }\n  const [anio, mes, dia] = valor.split('-').map(Number);\n  const utc = new Date(Date.UTC(anio, mes - 1, dia));\n  if (utc.getUTCFullYear() !== anio || utc.getUTCMonth() !== mes - 1 || utc.getUTCDate() !== dia) {\n    throw new Error('FECHA_INVALIDA: la fecha no existe');\n  }\n  return utc;\n}\n\nfunction utcAISO(fecha) {\n  return fecha.toISOString().slice(0, 10);\n}\n\nfunction fechaHoyCR() {\n  const partes = new Intl.DateTimeFormat('en-US', {\n    timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit'\n  }).formatToParts(new Date());\n  const valor = Object.fromEntries(partes.map(p => [p.type, p.value]));\n  return `${valor.year}-${valor.month}-${valor.day}`;\n}\n\nclass CalendarioLaboral {\n  constructor(feriados) {\n    if (!Array.isArray(feriados)) throw new Error('FERIADOS_INVALIDOS: se esperaba lista');\n    this.feriados = new Set();\n    for (const feriado of feriados) {\n      if (typeof feriado === 'string') {\n        fechaISO(feriado);\n        this.feriados.add(feriado);\n        continue;\n      }\n      // Solo feriados PUBLICOS nacionales, no observancias ni festividades regionales.\n      if (feriado && feriado.global === true && Array.isArray(feriado.types) && feriado.types.includes('Public')) {\n        fechaISO(feriado.date);\n        this.feriados.add(feriado.date);\n      }\n    }\n  }\n\n  esHabil(fecha) {\n    const d = fechaISO(fecha);\n    const diaSemana = d.getUTCDay();\n    return diaSemana !== 0 && diaSemana !== 6 && !this.feriados.has(fecha);\n  }\n\n  sumarDiasHabiles(fechaEmision, diasHabiles) {\n    const fecha = fechaISO(fechaEmision);\n    if (!Number.isInteger(diasHabiles) || diasHabiles < 1 || diasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    const cursor = new Date(fecha.getTime());\n    let acumulados = 0;\n    for (let iteracion = 0; acumulados < diasHabiles; iteracion++) {\n      // Límite defensivo: evita ciclos anómalos por configuraciones irrazonables.\n      if (iteracion > 366) throw new Error('CALENDARIO_INVALIDO: imposible calcular plazo');\n      cursor.setUTCDate(cursor.getUTCDate() + 1); // emisión NO cuenta\n      if (this.esHabil(utcAISO(cursor))) acumulados++;\n    }\n    return utcAISO(cursor);\n  }\n}\n\nclass Factura {\n  constructor(datos) {\n    if (!datos || typeof datos !== 'object' || Array.isArray(datos)) {\n      throw new Error('FACTURA_INVALIDA: registro inexistente');\n    }\n    if ((typeof datos.id !== 'string' && typeof datos.id !== 'number') || String(datos.id).trim() === '') {\n      throw new Error('ID_INVALIDO: no existe identificador');\n    }\n    this.id = String(datos.id);\n    this.cliente = typeof datos.cliente === 'string' ? datos.cliente : 'Sin nombre';\n    fechaISO(datos.fechaEmision);\n    this.fechaEmision = datos.fechaEmision;\n    if (!Number.isInteger(datos.plazoDiasHabiles) || datos.plazoDiasHabiles < 1 || datos.plazoDiasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    this.plazoDiasHabiles = datos.plazoDiasHabiles;\n    const estadosValidos = ['pendiente', 'vencida', 'pagada', 'anulada'];\n    if (!estadosValidos.includes(datos.estado)) throw new Error('ESTADO_INVALIDO: estado desconocido');\n    this.estado = datos.estado;\n    this.fechaVencimiento = datos.fechaVencimiento ?? null;\n  }\n\n  estaCerrada() {\n    return this.estado === 'pagada' || this.estado === 'anulada';\n  }\n\n  evaluar(calendario, hoyISO) {\n    fechaISO(hoyISO);\n    if (this.estaCerrada()) {\n      return { id: this.id, cliente: this.cliente, accion: 'OMITIR_CERRADA', guardar: false,\n        estado: this.estado, fechaVencimiento: this.fechaVencimiento,\n        detalle: 'Factura pagada o anulada: no se modifica.' };\n    }\n    const vencimiento = calendario.sumarDiasHabiles(this.fechaEmision, this.plazoDiasHabiles);\n    const nuevoEstado = hoyISO > vencimiento ? 'vencida' : 'pendiente';\n    const cambio = vencimiento !== this.fechaVencimiento || nuevoEstado !== this.estado;\n    return { id: this.id, cliente: this.cliente, accion: cambio ? 'ACTUALIZAR' : 'SIN_CAMBIOS',\n      guardar: cambio, estado: nuevoEstado, fechaVencimiento: vencimiento,\n      detalle: cambio ? 'Requiere actualizar fecha y/o estado.' : 'Resultado idéntico; evita escritura duplicada.' };\n  }\n}\n\nfunction aniosRequeridos(registros) {\n  const anios = new Set();\n  for (const registro of registros) {\n    try {\n      const factura = new Factura(registro);\n      if (factura.estaCerrada()) continue;\n      const fecha = fechaISO(factura.fechaEmision);\n      // Cota superior deliberadamente holgada, max. 60 días hábiles.\n      const limite = new Date(fecha.getTime() + (factura.plazoDiasHabiles * 3 + 14) * DIA_MS);\n      for (let a = fecha.getUTCFullYear(); a <= limite.getUTCFullYear(); a++) anios.add(a);\n    } catch (_) { /* El evaluador informa el registro inválido individualmente. */ }\n  }\n  return [...anios].sort((a, b) => a - b);\n}\n\nfunction procesarFacturas(registros, feriados, hoyISO) {\n  const calendario = new CalendarioLaboral(feriados);\n  fechaISO(hoyISO);\n  return registros.map(registro => {\n    try {\n      return new Factura(registro).evaluar(calendario, hoyISO);\n    } catch (error) {\n      return { id: registro?.id == null ? null : String(registro.id),\n        accion: 'ERROR_VALIDACION', guardar: false,\n        detalle: String(error.message || error) };\n    }\n  });\n}\n\nclass HistorialTendencia {\n  constructor(historial = []) {\n    if (!Array.isArray(historial)) throw new Error('HISTORIAL_INVALIDO: se esperaba lista');\n    this.historial = historial\n      .filter(item => item && item.resultado === 'OK' && Number.isFinite(Number(item.montoVencido)))\n      .sort((a, b) => String(a.fechaEjecucion).localeCompare(String(b.fechaEjecucion)));\n  }\n\n  determinar(actual) {\n    if (actual.resultado !== 'OK') {\n      return { tendencia: 'NO_DISPONIBLE', conclusion: 'La ejecucion tuvo errores y no se usa para evaluar la tendencia.' };\n    }\n    const anterior = this.historial.at(-1);\n    if (!anterior) {\n      return { tendencia: 'SIN_DATOS', conclusion: 'Primera medicion: aun no existe una ejecucion anterior para comparar.' };\n    }\n    const montoAnterior = Number(anterior.montoVencido) || 0;\n    const montoActual = Number(actual.montoVencido) || 0;\n    const vencidasAnterior = Number(anterior.vencidas) || 0;\n    const vencidasActual = Number(actual.vencidas) || 0;\n    if (montoActual < montoAnterior || (montoActual === montoAnterior && vencidasActual < vencidasAnterior)) {\n      return { tendencia: 'MEJORANDO', conclusion: 'La cartera vencida disminuyo respecto a la ejecucion anterior.' };\n    }\n    if (montoActual > montoAnterior || (montoActual === montoAnterior && vencidasActual > vencidasAnterior)) {\n      return { tendencia: 'EMPEORANDO', conclusion: 'La cartera vencida aumento respecto a la ejecucion anterior.' };\n    }\n    return { tendencia: 'ESTABLE', conclusion: 'La cartera vencida se mantiene igual a la ejecucion anterior.' };\n  }\n\n  crearRegistro(facturas, resultados, fechaEjecucion = new Date().toISOString()) {\n    if (!Array.isArray(facturas) || !Array.isArray(resultados)) {\n      throw new Error('DATOS_TENDENCIA_INVALIDOS: se esperaban listas');\n    }\n    const porId = new Map(resultados.filter(item => item?.id != null).map(item => [String(item.id), item]));\n    const consolidadas = facturas.map(factura => ({\n      ...factura,\n      estado: porId.get(String(factura.id))?.estado ?? factura.estado\n    }));\n    const contar = estado => consolidadas.filter(item => item.estado === estado).length;\n    const monto = estado => consolidadas\n      .filter(item => item.estado === estado)\n      .reduce((total, item) => total + (Number(item.monto) || 0), 0);\n    const errores = resultados.filter(item => String(item?.accion || '').startsWith('ERROR_')).length;\n    const actual = {\n      fechaEjecucion,\n      resultado: errores === resultados.length && errores > 0 ? 'ERROR' : 'OK',\n      totalFacturas: consolidadas.length,\n      pendientes: contar('pendiente'),\n      vencidas: contar('vencida'),\n      pagadas: contar('pagada'),\n      anuladas: contar('anulada'),\n      montoPendiente: monto('pendiente'),\n      montoVencido: monto('vencida'),\n      errores\n    };\n    return { ...actual, ...this.determinar(actual) };\n  }\n}\n\n\n\nfunction registrosDesde(items) {\n  return items.flatMap(item => {\n    const valor = item.json;\n    if (Array.isArray(valor)) return valor;\n    if (Array.isArray(valor?.data)) return valor.data;\n    if (Array.isArray(valor?.facturas)) return valor.facturas;\n    return [valor];\n  });\n}\nfunction falloJSONServer(registros) {\n  return registros.length === 1 && (\n    !registros[0] || registros[0].error != null || registros[0].code === 'ECONNREFUSED'\n  );\n}\n\nconst registros = registrosDesde($('GET Facturas - JSON Server').all());\nif (falloJSONServer(registros)) {\n  return [{json: {consultar:false, accion:'ERROR_JSON_SERVER', guardar:false,\n    detalle: 'JSON Server no respondió o devolvió un error. Verifica el puerto 3001 y la ruta /facturas.'}}];\n}\nif (!registros.length || registros.every(item => !item || Object.keys(item).length === 0)) {\n  return [{json:{consultar:false, accion:'SIN_FACTURAS', guardar:false,\n    detalle:'No existen facturas para evaluar.'}}];\n}\nconst anios = aniosRequeridos(registros);\nif (!anios.length) {\n  return [{json:{consultar:false, accion:'SIN_CONSULTA', guardar:false,\n    detalle:'No hay facturas abiertas con fechas válidas; se revisarán los errores locales.'}}];\n}\nreturn anios.map(anio => ({json:{consultar:true, anio}}));"
+      },
+      "id": "e5c189a1-0000-4000-8000-000000000001",
+      "name": "Preparar anios y validar fuente",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-consultar",
+              "leftValue": "={{ $json.consultar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "47e85bb9-0000-4000-8000-000000000001",
+      "name": "Hay calendarios para consultar",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://date.nager.at/api/v3/PublicHolidays/{{$json.anio}}/CR",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "f71b119f-0000-4000-8000-000000000001",
+      "name": "GET Feriados - Nager Date",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1450,
+        210
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// AUTO-GENERADO desde src/negocio.js (SHA256: ec17fa5ef51fed8b9ccfd7f55a0ff23e9b1792f246baba2bb9a2fd13122ef188).\n// Modifica src/negocio.js y ejecuta npm run workflow:build.\nconst DIA_MS = 24 * 60 * 60 * 1000;\n\nfunction fechaISO(valor) {\n  if (typeof valor !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(valor)) {\n    throw new Error('FECHA_INVALIDA: se requiere AAAA-MM-DD');\n  }\n  const [anio, mes, dia] = valor.split('-').map(Number);\n  const utc = new Date(Date.UTC(anio, mes - 1, dia));\n  if (utc.getUTCFullYear() !== anio || utc.getUTCMonth() !== mes - 1 || utc.getUTCDate() !== dia) {\n    throw new Error('FECHA_INVALIDA: la fecha no existe');\n  }\n  return utc;\n}\n\nfunction utcAISO(fecha) {\n  return fecha.toISOString().slice(0, 10);\n}\n\nfunction fechaHoyCR() {\n  const partes = new Intl.DateTimeFormat('en-US', {\n    timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit'\n  }).formatToParts(new Date());\n  const valor = Object.fromEntries(partes.map(p => [p.type, p.value]));\n  return `${valor.year}-${valor.month}-${valor.day}`;\n}\n\nclass CalendarioLaboral {\n  constructor(feriados) {\n    if (!Array.isArray(feriados)) throw new Error('FERIADOS_INVALIDOS: se esperaba lista');\n    this.feriados = new Set();\n    for (const feriado of feriados) {\n      if (typeof feriado === 'string') {\n        fechaISO(feriado);\n        this.feriados.add(feriado);\n        continue;\n      }\n      // Solo feriados PUBLICOS nacionales, no observancias ni festividades regionales.\n      if (feriado && feriado.global === true && Array.isArray(feriado.types) && feriado.types.includes('Public')) {\n        fechaISO(feriado.date);\n        this.feriados.add(feriado.date);\n      }\n    }\n  }\n\n  esHabil(fecha) {\n    const d = fechaISO(fecha);\n    const diaSemana = d.getUTCDay();\n    return diaSemana !== 0 && diaSemana !== 6 && !this.feriados.has(fecha);\n  }\n\n  sumarDiasHabiles(fechaEmision, diasHabiles) {\n    const fecha = fechaISO(fechaEmision);\n    if (!Number.isInteger(diasHabiles) || diasHabiles < 1 || diasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    const cursor = new Date(fecha.getTime());\n    let acumulados = 0;\n    for (let iteracion = 0; acumulados < diasHabiles; iteracion++) {\n      // Límite defensivo: evita ciclos anómalos por configuraciones irrazonables.\n      if (iteracion > 366) throw new Error('CALENDARIO_INVALIDO: imposible calcular plazo');\n      cursor.setUTCDate(cursor.getUTCDate() + 1); // emisión NO cuenta\n      if (this.esHabil(utcAISO(cursor))) acumulados++;\n    }\n    return utcAISO(cursor);\n  }\n}\n\nclass Factura {\n  constructor(datos) {\n    if (!datos || typeof datos !== 'object' || Array.isArray(datos)) {\n      throw new Error('FACTURA_INVALIDA: registro inexistente');\n    }\n    if ((typeof datos.id !== 'string' && typeof datos.id !== 'number') || String(datos.id).trim() === '') {\n      throw new Error('ID_INVALIDO: no existe identificador');\n    }\n    this.id = String(datos.id);\n    this.cliente = typeof datos.cliente === 'string' ? datos.cliente : 'Sin nombre';\n    fechaISO(datos.fechaEmision);\n    this.fechaEmision = datos.fechaEmision;\n    if (!Number.isInteger(datos.plazoDiasHabiles) || datos.plazoDiasHabiles < 1 || datos.plazoDiasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    this.plazoDiasHabiles = datos.plazoDiasHabiles;\n    const estadosValidos = ['pendiente', 'vencida', 'pagada', 'anulada'];\n    if (!estadosValidos.includes(datos.estado)) throw new Error('ESTADO_INVALIDO: estado desconocido');\n    this.estado = datos.estado;\n    this.fechaVencimiento = datos.fechaVencimiento ?? null;\n  }\n\n  estaCerrada() {\n    return this.estado === 'pagada' || this.estado === 'anulada';\n  }\n\n  evaluar(calendario, hoyISO) {\n    fechaISO(hoyISO);\n    if (this.estaCerrada()) {\n      return { id: this.id, cliente: this.cliente, accion: 'OMITIR_CERRADA', guardar: false,\n        estado: this.estado, fechaVencimiento: this.fechaVencimiento,\n        detalle: 'Factura pagada o anulada: no se modifica.' };\n    }\n    const vencimiento = calendario.sumarDiasHabiles(this.fechaEmision, this.plazoDiasHabiles);\n    const nuevoEstado = hoyISO > vencimiento ? 'vencida' : 'pendiente';\n    const cambio = vencimiento !== this.fechaVencimiento || nuevoEstado !== this.estado;\n    return { id: this.id, cliente: this.cliente, accion: cambio ? 'ACTUALIZAR' : 'SIN_CAMBIOS',\n      guardar: cambio, estado: nuevoEstado, fechaVencimiento: vencimiento,\n      detalle: cambio ? 'Requiere actualizar fecha y/o estado.' : 'Resultado idéntico; evita escritura duplicada.' };\n  }\n}\n\nfunction aniosRequeridos(registros) {\n  const anios = new Set();\n  for (const registro of registros) {\n    try {\n      const factura = new Factura(registro);\n      if (factura.estaCerrada()) continue;\n      const fecha = fechaISO(factura.fechaEmision);\n      // Cota superior deliberadamente holgada, max. 60 días hábiles.\n      const limite = new Date(fecha.getTime() + (factura.plazoDiasHabiles * 3 + 14) * DIA_MS);\n      for (let a = fecha.getUTCFullYear(); a <= limite.getUTCFullYear(); a++) anios.add(a);\n    } catch (_) { /* El evaluador informa el registro inválido individualmente. */ }\n  }\n  return [...anios].sort((a, b) => a - b);\n}\n\nfunction procesarFacturas(registros, feriados, hoyISO) {\n  const calendario = new CalendarioLaboral(feriados);\n  fechaISO(hoyISO);\n  return registros.map(registro => {\n    try {\n      return new Factura(registro).evaluar(calendario, hoyISO);\n    } catch (error) {\n      return { id: registro?.id == null ? null : String(registro.id),\n        accion: 'ERROR_VALIDACION', guardar: false,\n        detalle: String(error.message || error) };\n    }\n  });\n}\n\nclass HistorialTendencia {\n  constructor(historial = []) {\n    if (!Array.isArray(historial)) throw new Error('HISTORIAL_INVALIDO: se esperaba lista');\n    this.historial = historial\n      .filter(item => item && item.resultado === 'OK' && Number.isFinite(Number(item.montoVencido)))\n      .sort((a, b) => String(a.fechaEjecucion).localeCompare(String(b.fechaEjecucion)));\n  }\n\n  determinar(actual) {\n    if (actual.resultado !== 'OK') {\n      return { tendencia: 'NO_DISPONIBLE', conclusion: 'La ejecucion tuvo errores y no se usa para evaluar la tendencia.' };\n    }\n    const anterior = this.historial.at(-1);\n    if (!anterior) {\n      return { tendencia: 'SIN_DATOS', conclusion: 'Primera medicion: aun no existe una ejecucion anterior para comparar.' };\n    }\n    const montoAnterior = Number(anterior.montoVencido) || 0;\n    const montoActual = Number(actual.montoVencido) || 0;\n    const vencidasAnterior = Number(anterior.vencidas) || 0;\n    const vencidasActual = Number(actual.vencidas) || 0;\n    if (montoActual < montoAnterior || (montoActual === montoAnterior && vencidasActual < vencidasAnterior)) {\n      return { tendencia: 'MEJORANDO', conclusion: 'La cartera vencida disminuyo respecto a la ejecucion anterior.' };\n    }\n    if (montoActual > montoAnterior || (montoActual === montoAnterior && vencidasActual > vencidasAnterior)) {\n      return { tendencia: 'EMPEORANDO', conclusion: 'La cartera vencida aumento respecto a la ejecucion anterior.' };\n    }\n    return { tendencia: 'ESTABLE', conclusion: 'La cartera vencida se mantiene igual a la ejecucion anterior.' };\n  }\n\n  crearRegistro(facturas, resultados, fechaEjecucion = new Date().toISOString()) {\n    if (!Array.isArray(facturas) || !Array.isArray(resultados)) {\n      throw new Error('DATOS_TENDENCIA_INVALIDOS: se esperaban listas');\n    }\n    const porId = new Map(resultados.filter(item => item?.id != null).map(item => [String(item.id), item]));\n    const consolidadas = facturas.map(factura => ({\n      ...factura,\n      estado: porId.get(String(factura.id))?.estado ?? factura.estado\n    }));\n    const contar = estado => consolidadas.filter(item => item.estado === estado).length;\n    const monto = estado => consolidadas\n      .filter(item => item.estado === estado)\n      .reduce((total, item) => total + (Number(item.monto) || 0), 0);\n    const errores = resultados.filter(item => String(item?.accion || '').startsWith('ERROR_')).length;\n    const actual = {\n      fechaEjecucion,\n      resultado: errores === resultados.length && errores > 0 ? 'ERROR' : 'OK',\n      totalFacturas: consolidadas.length,\n      pendientes: contar('pendiente'),\n      vencidas: contar('vencida'),\n      pagadas: contar('pagada'),\n      anuladas: contar('anulada'),\n      montoPendiente: monto('pendiente'),\n      montoVencido: monto('vencida'),\n      errores\n    };\n    return { ...actual, ...this.determinar(actual) };\n  }\n}\n\n\n\nfunction registrosDesde(items) {\n  return items.flatMap(item => {\n    const valor = item.json;\n    if (Array.isArray(valor)) return valor;\n    if (Array.isArray(valor?.data)) return valor.data;\n    if (Array.isArray(valor?.facturas)) return valor.facturas;\n    return [valor];\n  });\n}\nfunction falloJSONServer(registros) {\n  return registros.length === 1 && (\n    !registros[0] || registros[0].error != null || registros[0].code === 'ECONNREFUSED'\n  );\n}\n\nconst registros = registrosDesde($('GET Facturas - JSON Server').all());\nconst respuestas = registrosDesde($input.all());\nconst aniosEsperados = $('Preparar anios y validar fuente').all()\n  .filter(item => item.json.consultar === true).map(item => Number(item.json.anio));\nconst errorHTTP = respuestas.some(item => !item || item.error != null || item.code != null);\nconst fechas = respuestas.filter(item => typeof item?.date === 'string' &&\n  /^\\d{4}-\\d{2}-\\d{2}$/.test(item.date));\nconst aniosPresentes = new Set(fechas.map(item => Number(item.date.slice(0, 4))));\nconst faltantes = aniosEsperados.filter(anio => !aniosPresentes.has(anio));\nif (errorHTTP || faltantes.length || !fechas.length) {\n  return [{json:{ accion:'ERROR_API', guardar:false,\n    detalle:'No se pudieron verificar TODOS los calendarios requeridos (' +\n      aniosEsperados.join(', ') + '). No se modifica ninguna factura. ' +\n      (faltantes.length ? 'Sin respuesta valida para: ' + faltantes.join(', ') : 'Respuesta de error o vacía.') }}];\n}\nconst resultados = procesarFacturas(registros, fechas, fechaHoyCR());\nreturn resultados.map(resultado => ({json: resultado}));"
+      },
+      "id": "7edd6416-0000-4000-8000-000000000001",
+      "name": "Calcular vencimientos POO",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1710,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-guardar",
+              "leftValue": "={{ $json.guardar }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5843056a-0000-4000-8000-000000000001",
+      "name": "Requiere actualizar factura",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://127.0.0.1:3001/facturas/{{$json.id}}",
+        "options": {
+          "timeout": 15000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ estado: $json.estado, fechaVencimiento: $json.fechaVencimiento }) }}"
+      },
+      "id": "91780255-0000-4000-8000-000000000001",
+      "name": "PATCH Factura - JSON Server",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2210,
+        90
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nreturn $input.all().map(item => {\n  const r = item.json;\n  if (r.error != null || r.code != null) return {json:{accion:'ERROR_ESCRITURA',\n    detalle:'No se pudo persistir un PATCH en JSON Server', error:r.error || r.code}};\n  return {json:{accion:'ACTUALIZACION_PERSISTIDA', id:r.id,\n    estado:r.estado, fechaVencimiento:r.fechaVencimiento,\n    detalle:'Registro confirmado por PATCH de JSON Server.'}};\n});"
+      },
+      "id": "62941828-0000-4000-8000-000000000001",
+      "name": "Verificar persistencia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2470,
+        90
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nreturn $input.all().map(item => ({json: {\n  ...item.json,\n  resultadoWorkflow: item.json.accion === 'ERROR_API' ? 'PROTEGIDO: sin escrituras' :\n    item.json.accion === 'ERROR_VALIDACION' ? 'REVISAR FACTURA' :\n    item.json.accion || 'SIN_CAMBIOS'\n}}));"
+      },
+      "id": "8d2a6d14-0000-4000-8000-000000000001",
+      "name": "Resultados sin cambios y alertas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2210,
+        330
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// AUTO-GENERADO desde src/negocio.js (SHA256: ec17fa5ef51fed8b9ccfd7f55a0ff23e9b1792f246baba2bb9a2fd13122ef188).\n// Modifica src/negocio.js y ejecuta npm run workflow:build.\nconst DIA_MS = 24 * 60 * 60 * 1000;\n\nfunction fechaISO(valor) {\n  if (typeof valor !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(valor)) {\n    throw new Error('FECHA_INVALIDA: se requiere AAAA-MM-DD');\n  }\n  const [anio, mes, dia] = valor.split('-').map(Number);\n  const utc = new Date(Date.UTC(anio, mes - 1, dia));\n  if (utc.getUTCFullYear() !== anio || utc.getUTCMonth() !== mes - 1 || utc.getUTCDate() !== dia) {\n    throw new Error('FECHA_INVALIDA: la fecha no existe');\n  }\n  return utc;\n}\n\nfunction utcAISO(fecha) {\n  return fecha.toISOString().slice(0, 10);\n}\n\nfunction fechaHoyCR() {\n  const partes = new Intl.DateTimeFormat('en-US', {\n    timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit'\n  }).formatToParts(new Date());\n  const valor = Object.fromEntries(partes.map(p => [p.type, p.value]));\n  return `${valor.year}-${valor.month}-${valor.day}`;\n}\n\nclass CalendarioLaboral {\n  constructor(feriados) {\n    if (!Array.isArray(feriados)) throw new Error('FERIADOS_INVALIDOS: se esperaba lista');\n    this.feriados = new Set();\n    for (const feriado of feriados) {\n      if (typeof feriado === 'string') {\n        fechaISO(feriado);\n        this.feriados.add(feriado);\n        continue;\n      }\n      // Solo feriados PUBLICOS nacionales, no observancias ni festividades regionales.\n      if (feriado && feriado.global === true && Array.isArray(feriado.types) && feriado.types.includes('Public')) {\n        fechaISO(feriado.date);\n        this.feriados.add(feriado.date);\n      }\n    }\n  }\n\n  esHabil(fecha) {\n    const d = fechaISO(fecha);\n    const diaSemana = d.getUTCDay();\n    return diaSemana !== 0 && diaSemana !== 6 && !this.feriados.has(fecha);\n  }\n\n  sumarDiasHabiles(fechaEmision, diasHabiles) {\n    const fecha = fechaISO(fechaEmision);\n    if (!Number.isInteger(diasHabiles) || diasHabiles < 1 || diasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    const cursor = new Date(fecha.getTime());\n    let acumulados = 0;\n    for (let iteracion = 0; acumulados < diasHabiles; iteracion++) {\n      // Límite defensivo: evita ciclos anómalos por configuraciones irrazonables.\n      if (iteracion > 366) throw new Error('CALENDARIO_INVALIDO: imposible calcular plazo');\n      cursor.setUTCDate(cursor.getUTCDate() + 1); // emisión NO cuenta\n      if (this.esHabil(utcAISO(cursor))) acumulados++;\n    }\n    return utcAISO(cursor);\n  }\n}\n\nclass Factura {\n  constructor(datos) {\n    if (!datos || typeof datos !== 'object' || Array.isArray(datos)) {\n      throw new Error('FACTURA_INVALIDA: registro inexistente');\n    }\n    if ((typeof datos.id !== 'string' && typeof datos.id !== 'number') || String(datos.id).trim() === '') {\n      throw new Error('ID_INVALIDO: no existe identificador');\n    }\n    this.id = String(datos.id);\n    this.cliente = typeof datos.cliente === 'string' ? datos.cliente : 'Sin nombre';\n    fechaISO(datos.fechaEmision);\n    this.fechaEmision = datos.fechaEmision;\n    if (!Number.isInteger(datos.plazoDiasHabiles) || datos.plazoDiasHabiles < 1 || datos.plazoDiasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    this.plazoDiasHabiles = datos.plazoDiasHabiles;\n    const estadosValidos = ['pendiente', 'vencida', 'pagada', 'anulada'];\n    if (!estadosValidos.includes(datos.estado)) throw new Error('ESTADO_INVALIDO: estado desconocido');\n    this.estado = datos.estado;\n    this.fechaVencimiento = datos.fechaVencimiento ?? null;\n  }\n\n  estaCerrada() {\n    return this.estado === 'pagada' || this.estado === 'anulada';\n  }\n\n  evaluar(calendario, hoyISO) {\n    fechaISO(hoyISO);\n    if (this.estaCerrada()) {\n      return { id: this.id, cliente: this.cliente, accion: 'OMITIR_CERRADA', guardar: false,\n        estado: this.estado, fechaVencimiento: this.fechaVencimiento,\n        detalle: 'Factura pagada o anulada: no se modifica.' };\n    }\n    const vencimiento = calendario.sumarDiasHabiles(this.fechaEmision, this.plazoDiasHabiles);\n    const nuevoEstado = hoyISO > vencimiento ? 'vencida' : 'pendiente';\n    const cambio = vencimiento !== this.fechaVencimiento || nuevoEstado !== this.estado;\n    return { id: this.id, cliente: this.cliente, accion: cambio ? 'ACTUALIZAR' : 'SIN_CAMBIOS',\n      guardar: cambio, estado: nuevoEstado, fechaVencimiento: vencimiento,\n      detalle: cambio ? 'Requiere actualizar fecha y/o estado.' : 'Resultado idéntico; evita escritura duplicada.' };\n  }\n}\n\nfunction aniosRequeridos(registros) {\n  const anios = new Set();\n  for (const registro of registros) {\n    try {\n      const factura = new Factura(registro);\n      if (factura.estaCerrada()) continue;\n      const fecha = fechaISO(factura.fechaEmision);\n      // Cota superior deliberadamente holgada, max. 60 días hábiles.\n      const limite = new Date(fecha.getTime() + (factura.plazoDiasHabiles * 3 + 14) * DIA_MS);\n      for (let a = fecha.getUTCFullYear(); a <= limite.getUTCFullYear(); a++) anios.add(a);\n    } catch (_) { /* El evaluador informa el registro inválido individualmente. */ }\n  }\n  return [...anios].sort((a, b) => a - b);\n}\n\nfunction procesarFacturas(registros, feriados, hoyISO) {\n  const calendario = new CalendarioLaboral(feriados);\n  fechaISO(hoyISO);\n  return registros.map(registro => {\n    try {\n      return new Factura(registro).evaluar(calendario, hoyISO);\n    } catch (error) {\n      return { id: registro?.id == null ? null : String(registro.id),\n        accion: 'ERROR_VALIDACION', guardar: false,\n        detalle: String(error.message || error) };\n    }\n  });\n}\n\nclass HistorialTendencia {\n  constructor(historial = []) {\n    if (!Array.isArray(historial)) throw new Error('HISTORIAL_INVALIDO: se esperaba lista');\n    this.historial = historial\n      .filter(item => item && item.resultado === 'OK' && Number.isFinite(Number(item.montoVencido)))\n      .sort((a, b) => String(a.fechaEjecucion).localeCompare(String(b.fechaEjecucion)));\n  }\n\n  determinar(actual) {\n    if (actual.resultado !== 'OK') {\n      return { tendencia: 'NO_DISPONIBLE', conclusion: 'La ejecucion tuvo errores y no se usa para evaluar la tendencia.' };\n    }\n    const anterior = this.historial.at(-1);\n    if (!anterior) {\n      return { tendencia: 'SIN_DATOS', conclusion: 'Primera medicion: aun no existe una ejecucion anterior para comparar.' };\n    }\n    const montoAnterior = Number(anterior.montoVencido) || 0;\n    const montoActual = Number(actual.montoVencido) || 0;\n    const vencidasAnterior = Number(anterior.vencidas) || 0;\n    const vencidasActual = Number(actual.vencidas) || 0;\n    if (montoActual < montoAnterior || (montoActual === montoAnterior && vencidasActual < vencidasAnterior)) {\n      return { tendencia: 'MEJORANDO', conclusion: 'La cartera vencida disminuyo respecto a la ejecucion anterior.' };\n    }\n    if (montoActual > montoAnterior || (montoActual === montoAnterior && vencidasActual > vencidasAnterior)) {\n      return { tendencia: 'EMPEORANDO', conclusion: 'La cartera vencida aumento respecto a la ejecucion anterior.' };\n    }\n    return { tendencia: 'ESTABLE', conclusion: 'La cartera vencida se mantiene igual a la ejecucion anterior.' };\n  }\n\n  crearRegistro(facturas, resultados, fechaEjecucion = new Date().toISOString()) {\n    if (!Array.isArray(facturas) || !Array.isArray(resultados)) {\n      throw new Error('DATOS_TENDENCIA_INVALIDOS: se esperaban listas');\n    }\n    const porId = new Map(resultados.filter(item => item?.id != null).map(item => [String(item.id), item]));\n    const consolidadas = facturas.map(factura => ({\n      ...factura,\n      estado: porId.get(String(factura.id))?.estado ?? factura.estado\n    }));\n    const contar = estado => consolidadas.filter(item => item.estado === estado).length;\n    const monto = estado => consolidadas\n      .filter(item => item.estado === estado)\n      .reduce((total, item) => total + (Number(item.monto) || 0), 0);\n    const errores = resultados.filter(item => String(item?.accion || '').startsWith('ERROR_')).length;\n    const actual = {\n      fechaEjecucion,\n      resultado: errores === resultados.length && errores > 0 ? 'ERROR' : 'OK',\n      totalFacturas: consolidadas.length,\n      pendientes: contar('pendiente'),\n      vencidas: contar('vencida'),\n      pagadas: contar('pagada'),\n      anuladas: contar('anulada'),\n      montoPendiente: monto('pendiente'),\n      montoVencido: monto('vencida'),\n      errores\n    };\n    return { ...actual, ...this.determinar(actual) };\n  }\n}\n\n\n\nfunction registrosDesde(items) {\n  return items.flatMap(item => {\n    const valor = item.json;\n    if (Array.isArray(valor)) return valor;\n    if (Array.isArray(valor?.data)) return valor.data;\n    if (Array.isArray(valor?.facturas)) return valor.facturas;\n    return [valor];\n  });\n}\nfunction falloJSONServer(registros) {\n  return registros.length === 1 && (\n    !registros[0] || registros[0].error != null || registros[0].code === 'ECONNREFUSED'\n  );\n}\n\nconst control = $input.first().json;\nif (control.accion !== 'SIN_CONSULTA') return [{json:control}];\nconst registros = registrosDesde($('GET Facturas - JSON Server').all());\nconst resultados = procesarFacturas(registros, [], fechaHoyCR());\nreturn resultados.map(resultado => ({json:resultado}));"
+      },
+      "id": "ebfdc111-0000-4000-8000-000000000001",
+      "name": "Sin consulta o fallo de origen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1450,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// AUTO-GENERADO desde src/negocio.js (SHA256: ec17fa5ef51fed8b9ccfd7f55a0ff23e9b1792f246baba2bb9a2fd13122ef188).\n// Modifica src/negocio.js y ejecuta npm run workflow:build.\nconst DIA_MS = 24 * 60 * 60 * 1000;\n\nfunction fechaISO(valor) {\n  if (typeof valor !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(valor)) {\n    throw new Error('FECHA_INVALIDA: se requiere AAAA-MM-DD');\n  }\n  const [anio, mes, dia] = valor.split('-').map(Number);\n  const utc = new Date(Date.UTC(anio, mes - 1, dia));\n  if (utc.getUTCFullYear() !== anio || utc.getUTCMonth() !== mes - 1 || utc.getUTCDate() !== dia) {\n    throw new Error('FECHA_INVALIDA: la fecha no existe');\n  }\n  return utc;\n}\n\nfunction utcAISO(fecha) {\n  return fecha.toISOString().slice(0, 10);\n}\n\nfunction fechaHoyCR() {\n  const partes = new Intl.DateTimeFormat('en-US', {\n    timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit'\n  }).formatToParts(new Date());\n  const valor = Object.fromEntries(partes.map(p => [p.type, p.value]));\n  return `${valor.year}-${valor.month}-${valor.day}`;\n}\n\nclass CalendarioLaboral {\n  constructor(feriados) {\n    if (!Array.isArray(feriados)) throw new Error('FERIADOS_INVALIDOS: se esperaba lista');\n    this.feriados = new Set();\n    for (const feriado of feriados) {\n      if (typeof feriado === 'string') {\n        fechaISO(feriado);\n        this.feriados.add(feriado);\n        continue;\n      }\n      // Solo feriados PUBLICOS nacionales, no observancias ni festividades regionales.\n      if (feriado && feriado.global === true && Array.isArray(feriado.types) && feriado.types.includes('Public')) {\n        fechaISO(feriado.date);\n        this.feriados.add(feriado.date);\n      }\n    }\n  }\n\n  esHabil(fecha) {\n    const d = fechaISO(fecha);\n    const diaSemana = d.getUTCDay();\n    return diaSemana !== 0 && diaSemana !== 6 && !this.feriados.has(fecha);\n  }\n\n  sumarDiasHabiles(fechaEmision, diasHabiles) {\n    const fecha = fechaISO(fechaEmision);\n    if (!Number.isInteger(diasHabiles) || diasHabiles < 1 || diasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    const cursor = new Date(fecha.getTime());\n    let acumulados = 0;\n    for (let iteracion = 0; acumulados < diasHabiles; iteracion++) {\n      // Límite defensivo: evita ciclos anómalos por configuraciones irrazonables.\n      if (iteracion > 366) throw new Error('CALENDARIO_INVALIDO: imposible calcular plazo');\n      cursor.setUTCDate(cursor.getUTCDate() + 1); // emisión NO cuenta\n      if (this.esHabil(utcAISO(cursor))) acumulados++;\n    }\n    return utcAISO(cursor);\n  }\n}\n\nclass Factura {\n  constructor(datos) {\n    if (!datos || typeof datos !== 'object' || Array.isArray(datos)) {\n      throw new Error('FACTURA_INVALIDA: registro inexistente');\n    }\n    if ((typeof datos.id !== 'string' && typeof datos.id !== 'number') || String(datos.id).trim() === '') {\n      throw new Error('ID_INVALIDO: no existe identificador');\n    }\n    this.id = String(datos.id);\n    this.cliente = typeof datos.cliente === 'string' ? datos.cliente : 'Sin nombre';\n    fechaISO(datos.fechaEmision);\n    this.fechaEmision = datos.fechaEmision;\n    if (!Number.isInteger(datos.plazoDiasHabiles) || datos.plazoDiasHabiles < 1 || datos.plazoDiasHabiles > 60) {\n      throw new Error('PLAZO_INVALIDO: debe ser entero de 1 a 60');\n    }\n    this.plazoDiasHabiles = datos.plazoDiasHabiles;\n    const estadosValidos = ['pendiente', 'vencida', 'pagada', 'anulada'];\n    if (!estadosValidos.includes(datos.estado)) throw new Error('ESTADO_INVALIDO: estado desconocido');\n    this.estado = datos.estado;\n    this.fechaVencimiento = datos.fechaVencimiento ?? null;\n  }\n\n  estaCerrada() {\n    return this.estado === 'pagada' || this.estado === 'anulada';\n  }\n\n  evaluar(calendario, hoyISO) {\n    fechaISO(hoyISO);\n    if (this.estaCerrada()) {\n      return { id: this.id, cliente: this.cliente, accion: 'OMITIR_CERRADA', guardar: false,\n        estado: this.estado, fechaVencimiento: this.fechaVencimiento,\n        detalle: 'Factura pagada o anulada: no se modifica.' };\n    }\n    const vencimiento = calendario.sumarDiasHabiles(this.fechaEmision, this.plazoDiasHabiles);\n    const nuevoEstado = hoyISO > vencimiento ? 'vencida' : 'pendiente';\n    const cambio = vencimiento !== this.fechaVencimiento || nuevoEstado !== this.estado;\n    return { id: this.id, cliente: this.cliente, accion: cambio ? 'ACTUALIZAR' : 'SIN_CAMBIOS',\n      guardar: cambio, estado: nuevoEstado, fechaVencimiento: vencimiento,\n      detalle: cambio ? 'Requiere actualizar fecha y/o estado.' : 'Resultado idéntico; evita escritura duplicada.' };\n  }\n}\n\nfunction aniosRequeridos(registros) {\n  const anios = new Set();\n  for (const registro of registros) {\n    try {\n      const factura = new Factura(registro);\n      if (factura.estaCerrada()) continue;\n      const fecha = fechaISO(factura.fechaEmision);\n      // Cota superior deliberadamente holgada, max. 60 días hábiles.\n      const limite = new Date(fecha.getTime() + (factura.plazoDiasHabiles * 3 + 14) * DIA_MS);\n      for (let a = fecha.getUTCFullYear(); a <= limite.getUTCFullYear(); a++) anios.add(a);\n    } catch (_) { /* El evaluador informa el registro inválido individualmente. */ }\n  }\n  return [...anios].sort((a, b) => a - b);\n}\n\nfunction procesarFacturas(registros, feriados, hoyISO) {\n  const calendario = new CalendarioLaboral(feriados);\n  fechaISO(hoyISO);\n  return registros.map(registro => {\n    try {\n      return new Factura(registro).evaluar(calendario, hoyISO);\n    } catch (error) {\n      return { id: registro?.id == null ? null : String(registro.id),\n        accion: 'ERROR_VALIDACION', guardar: false,\n        detalle: String(error.message || error) };\n    }\n  });\n}\n\nclass HistorialTendencia {\n  constructor(historial = []) {\n    if (!Array.isArray(historial)) throw new Error('HISTORIAL_INVALIDO: se esperaba lista');\n    this.historial = historial\n      .filter(item => item && item.resultado === 'OK' && Number.isFinite(Number(item.montoVencido)))\n      .sort((a, b) => String(a.fechaEjecucion).localeCompare(String(b.fechaEjecucion)));\n  }\n\n  determinar(actual) {\n    if (actual.resultado !== 'OK') {\n      return { tendencia: 'NO_DISPONIBLE', conclusion: 'La ejecucion tuvo errores y no se usa para evaluar la tendencia.' };\n    }\n    const anterior = this.historial.at(-1);\n    if (!anterior) {\n      return { tendencia: 'SIN_DATOS', conclusion: 'Primera medicion: aun no existe una ejecucion anterior para comparar.' };\n    }\n    const montoAnterior = Number(anterior.montoVencido) || 0;\n    const montoActual = Number(actual.montoVencido) || 0;\n    const vencidasAnterior = Number(anterior.vencidas) || 0;\n    const vencidasActual = Number(actual.vencidas) || 0;\n    if (montoActual < montoAnterior || (montoActual === montoAnterior && vencidasActual < vencidasAnterior)) {\n      return { tendencia: 'MEJORANDO', conclusion: 'La cartera vencida disminuyo respecto a la ejecucion anterior.' };\n    }\n    if (montoActual > montoAnterior || (montoActual === montoAnterior && vencidasActual > vencidasAnterior)) {\n      return { tendencia: 'EMPEORANDO', conclusion: 'La cartera vencida aumento respecto a la ejecucion anterior.' };\n    }\n    return { tendencia: 'ESTABLE', conclusion: 'La cartera vencida se mantiene igual a la ejecucion anterior.' };\n  }\n\n  crearRegistro(facturas, resultados, fechaEjecucion = new Date().toISOString()) {\n    if (!Array.isArray(facturas) || !Array.isArray(resultados)) {\n      throw new Error('DATOS_TENDENCIA_INVALIDOS: se esperaban listas');\n    }\n    const porId = new Map(resultados.filter(item => item?.id != null).map(item => [String(item.id), item]));\n    const consolidadas = facturas.map(factura => ({\n      ...factura,\n      estado: porId.get(String(factura.id))?.estado ?? factura.estado\n    }));\n    const contar = estado => consolidadas.filter(item => item.estado === estado).length;\n    const monto = estado => consolidadas\n      .filter(item => item.estado === estado)\n      .reduce((total, item) => total + (Number(item.monto) || 0), 0);\n    const errores = resultados.filter(item => String(item?.accion || '').startsWith('ERROR_')).length;\n    const actual = {\n      fechaEjecucion,\n      resultado: errores === resultados.length && errores > 0 ? 'ERROR' : 'OK',\n      totalFacturas: consolidadas.length,\n      pendientes: contar('pendiente'),\n      vencidas: contar('vencida'),\n      pagadas: contar('pagada'),\n      anuladas: contar('anulada'),\n      montoPendiente: monto('pendiente'),\n      montoVencido: monto('vencida'),\n      errores\n    };\n    return { ...actual, ...this.determinar(actual) };\n  }\n}\n\n\n\nfunction registrosDesde(items) {\n  return items.flatMap(item => {\n    const valor = item.json;\n    if (Array.isArray(valor)) return valor;\n    if (Array.isArray(valor?.data)) return valor.data;\n    if (Array.isArray(valor?.facturas)) return valor.facturas;\n    return [valor];\n  });\n}\nfunction falloJSONServer(registros) {\n  return registros.length === 1 && (\n    !registros[0] || registros[0].error != null || registros[0].code === 'ECONNREFUSED'\n  );\n}\n\nconst facturas = registrosDesde($('GET Facturas - JSON Server').all());\nconst resultados = registrosDesde($input.all());\nconst anteriores = registrosDesde($('GET Historial - JSON Server').all())\n  .filter(item => item && item.error == null && item.code == null);\nconst registro = new HistorialTendencia(anteriores)\n  .crearRegistro(facturas, resultados, new Date().toISOString());\nreturn [{json:registro}];"
+      },
+      "id": "67a5349d-0000-4000-8000-000000000001",
+      "name": "Crear historial y tendencia",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        550
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:3001/historial",
+        "options": {
+          "timeout": 15000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "bd58bb6c-0000-4000-8000-000000000001",
+      "name": "POST Historial - JSON Server",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2210,
+        550
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Ejecutar ahora": {
+      "main": [
+        [
+          {
+            "node": "GET Facturas - JSON Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cada dia a las 07:00": {
+      "main": [
+        [
+          {
+            "node": "GET Facturas - JSON Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Postman": {
+      "main": [
+        [
+          {
+            "node": "GET Facturas - JSON Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Facturas - JSON Server": {
+      "main": [
+        [
+          {
+            "node": "GET Historial - JSON Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Historial - JSON Server": {
+      "main": [
+        [
+          {
+            "node": "Preparar anios y validar fuente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar anios y validar fuente": {
+      "main": [
+        [
+          {
+            "node": "Hay calendarios para consultar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hay calendarios para consultar": {
+      "main": [
+        [
+          {
+            "node": "GET Feriados - Nager Date",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin consulta o fallo de origen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET Feriados - Nager Date": {
+      "main": [
+        [
+          {
+            "node": "Calcular vencimientos POO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular vencimientos POO": {
+      "main": [
+        [
+          {
+            "node": "Requiere actualizar factura",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Crear historial y tendencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requiere actualizar factura": {
+      "main": [
+        [
+          {
+            "node": "PATCH Factura - JSON Server",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resultados sin cambios y alertas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PATCH Factura - JSON Server": {
+      "main": [
+        [
+          {
+            "node": "Verificar persistencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin consulta o fallo de origen": {
+      "main": [
+        [
+          {
+            "node": "Crear historial y tendencia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear historial y tendencia": {
+      "main": [
+        [
+          {
+            "node": "POST Historial - JSON Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Costa_Rica"
+  },
+  "tags": [],
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "sourceHash": "ec17fa5ef51fed8b9ccfd7f55a0ff23e9b1792f246baba2bb9a2fd13122ef188"
+  }
+}

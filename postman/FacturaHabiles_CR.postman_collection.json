@@ -1,0 +1,83 @@
+{
+  "info": {
+    "_postman_id": "e7cb1e30-3418-4a98-8d89-a8ab602b32f2",
+    "name": "FacturaHabiles CR",
+    "description": "Solicitudes locales para administrar facturas, ejecutar el workflow de n8n y consultar tendencias.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "json_server_url", "value": "http://localhost:3001" },
+    { "key": "n8n_url", "value": "http://localhost:5678" },
+    { "key": "factura_id", "value": "F-POSTMAN-001" }
+  ],
+  "item": [
+    {
+      "name": "Facturas",
+      "item": [
+        {
+          "name": "Listar facturas",
+          "request": { "method": "GET", "header": [], "url": "{{json_server_url}}/facturas" },
+          "response": []
+        },
+        {
+          "name": "Crear factura",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{factura_id}}\",\n  \"cliente\": \"Cliente desde Postman\",\n  \"fechaEmision\": \"2026-10-19\",\n  \"plazoDiasHabiles\": 15,\n  \"monto\": 125000,\n  \"moneda\": \"CRC\",\n  \"estado\": \"pendiente\",\n  \"fechaVencimiento\": null\n}"
+            },
+            "url": "{{json_server_url}}/facturas"
+          },
+          "response": []
+        },
+        {
+          "name": "Marcar factura pagada",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"estado\": \"pagada\"\n}" },
+            "url": "{{json_server_url}}/facturas/{{factura_id}}"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "n8n",
+      "item": [
+        {
+          "name": "Ejecutar workflow - Produccion",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"accion\": \"procesar\",\n  \"origen\": \"postman\"\n}" },
+            "url": "{{n8n_url}}/webhook/facturas-procesar"
+          },
+          "response": []
+        },
+        {
+          "name": "Ejecutar workflow - Prueba",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"accion\": \"procesar\",\n  \"origen\": \"postman-test\"\n}" },
+            "url": "{{n8n_url}}/webhook-test/facturas-procesar"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Historial",
+      "item": [
+        {
+          "name": "Consultar historial y tendencias",
+          "request": { "method": "GET", "header": [], "url": "{{json_server_url}}/historial?_sort=fechaEjecucion&_order=desc" },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
